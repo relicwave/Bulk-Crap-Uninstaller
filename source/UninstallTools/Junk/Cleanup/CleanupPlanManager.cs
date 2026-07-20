@@ -16,7 +16,9 @@ namespace UninstallTools.Junk.Cleanup
             ICollection<ApplicationUninstallerEntry> allUninstallers,
             ListGenerationProgress.ListGenerationCallback progressCallback)
         {
-            return CleanupPlanBuilder.Build(JunkManager.FindJunk(targets, allUninstallers, progressCallback));
+            var results = JunkManager.FindJunk(targets, allUninstallers, progressCallback);
+            var riskClassifier = new FileSystemCleanupRiskClassifier(allUninstallers);
+            return CleanupPlanBuilder.Build(results, riskClassifier);
         }
     }
 }
