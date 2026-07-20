@@ -19,22 +19,26 @@ namespace UninstallTools.Junk.Cleanup
     public sealed class FileSystemCleanupRiskClassifier : ICleanupRiskClassifier
     {
         private readonly IReadOnlyList<ApplicationUninstallerEntry> _applications;
-        private readonly IReadOnlyList<string> _criticalRoots;
+        private readonly IReadOnlyList<string> _criticalTrees;
+        private readonly IReadOnlyList<string> _protectedRoots;
 
         public FileSystemCleanupRiskClassifier(IEnumerable<ApplicationUninstallerEntry> applications)
-            : this(applications, GetDefaultCriticalRoots())
+            : this(applications, GetDefaultCriticalTrees(), GetDefaultProtectedRoots())
         {
         }
 
         internal FileSystemCleanupRiskClassifier(IEnumerable<ApplicationUninstallerEntry> applications,
-            IEnumerable<string> criticalRoots)
+            IEnumerable<string> criticalTrees)
+            : this(applications, criticalTrees, Enumerable.Empty<string>())
+        {
+        }
+
+        internal FileSystemCleanupRiskClassifier(IEnumerable<ApplicationUninstallerEntry> applications,
+            IEnumerable<string> criticalTrees, IEnumerable<string> protectedRoots)
         {
             _applications = (applications ?? throw new ArgumentNullException(nameof(applications))).ToList();
-            _criticalRoots = (criticalRoots ?? throw new ArgumentNullException(nameof(criticalRoots)))
-                .Select(NormalizePath)
-                .Where(x => x != null)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
+            _criticalTrees = NormalizeDistinct(criticalTrees, nameof(criticalTrees));
+            _protectedRoots = NormalizeDistinct(protectedRoots, nameof(protectedRoots));
         }
 
         public CleanupRiskAssessment Classify(IJunkResult result)
@@ -55,14 +59,14 @@ namespace UninstallTools.Junk.Cleanup
                 return new CleanupRiskAssessment(CleanupRiskLevel.Critical,
                     "The candidate is a filesystem root.");
 
-            var protectedRoot = _criticalRoots.FirstOrDefault(root => PathsEqual(candidatePath, root));
-            if (protectedRoot != null)
+            if (_criticalTrees.Any(tree => IsSameOrDescendant(candidatePath, tree)))
                 return new CleanupRiskAssessment(CleanupRiskLevel.Critical,
-                    "The candidate is a protected Windows or profile root.");
+                    "The candidate is inside a protected Windows tree.");
 
-            if (_criticalRoots.Any(root => IsDescendant(root, candidatePath)))
+            if (_criticalTrees.Any(tree => IsDescendant(tree, candidatePath)) ||
+                _protectedRoots.Any(root => PathsEqual(candidatePath, root) || IsDescendant(root, candidatePath)))
                 return new CleanupRiskAssessment(CleanupRiskLevel.Critical,
-                    "The candidate is an ancestor of a protected Windows or profile root.");
+                    "The candidate is a protected root or an ancestor of one.");
 
             var target = result.Application;
             var targetInstallLocation = NormalizePath(target?.InstallLocation);
@@ -76,8 +80,10 @@ namespace UninstallTools.Junk.Cleanup
 
             var sharingApplications = _applications
                 .Where(x => !ReferenceEquals(x, target))
-                .Where(x => IsSameOrDescendant(candidatePath, NormalizePath(x.InstallLocation)) ||
-                            IsSameOrDescendant(NormalizePath(x.InstallLocation), candidatePath))
+                .Select(x => NormalizePath(x.InstallLocation))
+                .Where(x => x != null)
+                .Where(otherLocation => IsSameOrDescendant(candidatePath, otherLocation) ||
+                                        IsSameOrDescendant(otherLocation, candidatePath))
                 .ToList();
 
             if (sharingApplications.Count > 0)
@@ -92,11 +98,22 @@ namespace UninstallTools.Junk.Cleanup
                 "The candidate is contained by an exclusive registered installation location.");
         }
 
-        private static IEnumerable<string> GetDefaultCriticalRoots()
+        private static IReadOnlyList<string> NormalizeDistinct(IEnumerable<string> paths, string parameterName)
+        {
+            return (paths ?? throw new ArgumentNullException(parameterName))
+                .Select(NormalizePath)
+                .Where(x => x != null)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        private static IEnumerable<string> GetDefaultCriticalTrees()
         {
             yield return Environment.GetFolderPath(Environment.SpecialFolder.Windows);
-            yield return Environment.GetFolderPath(Environment.SpecialFolder.System);
-            yield return Environment.GetFolderPath(Environment.SpecialFolder.SystemX86);
+        }
+
+        private static IEnumerable<string> GetDefaultProtectedRoots()
+        {
             yield return Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
             yield return Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
             yield return Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
@@ -120,7 +137,7 @@ namespace UninstallTools.Junk.Cleanup
                 return fullPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
             }
             catch (Exception ex) when (ex is ArgumentException || ex is NotSupportedException ||
-                                       ex is PathTooLongException || ex is System.Security.SecurityException)
+                                       ex is IOException || ex is System.Security.SecurityException)
             {
                 return null;
             }
