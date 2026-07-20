@@ -10,7 +10,6 @@ using System.Linq;
 using Klocman.Extensions;
 using Klocman.Forms.Tools;
 using Klocman.Tools;
-using UninstallTools.Junk.Cleanup;
 using UninstallTools.Junk.Containers;
 using UninstallTools.Properties;
 
@@ -155,17 +154,6 @@ namespace UninstallTools.Junk
                 results.AddRange(target.AdditionalJunk);
 
             return CleanUpResults(results);
-        }
-
-        /// <summary>
-        /// Discover leftovers and return a non-destructive plan. The default risk
-        /// classifier is intentionally conservative and does not auto-select items.
-        /// </summary>
-        public static CleanupPlan FindCleanupPlan(IEnumerable<ApplicationUninstallerEntry> targets,
-            ICollection<ApplicationUninstallerEntry> allUninstallers,
-            ListGenerationProgress.ListGenerationCallback progressCallback)
-        {
-            return CleanupPlanBuilder.Build(FindJunk(targets, allUninstallers, progressCallback));
         }
 
         public static IEnumerable<IJunkResult> FindProgramFilesJunk(
