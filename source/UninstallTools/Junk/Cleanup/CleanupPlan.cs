@@ -12,11 +12,6 @@ using UninstallTools.Junk.Containers;
 
 namespace UninstallTools.Junk.Cleanup
 {
-    /// <summary>
-    /// Describes the potential impact of removing a cleanup candidate.
-    /// Risk is intentionally independent from confidence: an item can be a
-    /// confident match while still being dangerous because it is shared.
-    /// </summary>
     public enum CleanupRiskLevel
     {
         Low,
@@ -25,9 +20,6 @@ namespace UninstallTools.Junk.Cleanup
         Critical
     }
 
-    /// <summary>
-    /// Describes how a cleanup candidate should be presented to the user.
-    /// </summary>
     public enum CleanupSelection
     {
         Automatic,
@@ -35,9 +27,6 @@ namespace UninstallTools.Junk.Cleanup
         Blocked
     }
 
-    /// <summary>
-    /// A single reason contributing to the attribution of a cleanup candidate.
-    /// </summary>
     public sealed class CleanupEvidence
     {
         public CleanupEvidence(int weight, string reason)
@@ -57,10 +46,11 @@ namespace UninstallTools.Junk.Cleanup
     /// </summary>
     public sealed class CleanupCandidate
     {
-        internal CleanupCandidate(IJunkResult result, CleanupRiskLevel risk)
+        internal CleanupCandidate(IJunkResult result, CleanupRiskAssessment riskAssessment)
         {
             Result = result ?? throw new ArgumentNullException(nameof(result));
-            Risk = risk;
+            RiskAssessment = riskAssessment ?? throw new ArgumentNullException(nameof(riskAssessment));
+            Risk = riskAssessment.Level;
             Confidence = result.Confidence.GetConfidence();
             DisplayName = result.GetDisplayName();
             Evidence = new ReadOnlyCollection<CleanupEvidence>(result.Confidence.ConfidenceParts
@@ -72,14 +62,12 @@ namespace UninstallTools.Junk.Cleanup
         public IJunkResult Result { get; }
         public string DisplayName { get; }
         public ConfidenceLevel Confidence { get; }
+        public CleanupRiskAssessment RiskAssessment { get; }
         public CleanupRiskLevel Risk { get; }
         public CleanupSelection Selection { get; }
         public IReadOnlyList<CleanupEvidence> Evidence { get; }
     }
 
-    /// <summary>
-    /// Immutable dry-run representation of a cleanup operation.
-    /// </summary>
     public sealed class CleanupPlan
     {
         internal CleanupPlan(IEnumerable<CleanupCandidate> candidates)
@@ -103,10 +91,6 @@ namespace UninstallTools.Junk.Cleanup
         public IReadOnlyList<CleanupCandidate> BlockedCandidates { get; }
     }
 
-    /// <summary>
-    /// Central safety rule used by GUI and console cleanup planning.
-    /// Automatic selection requires both very high confidence and explicitly low risk.
-    /// </summary>
     public static class CleanupSafetyPolicy
     {
         public static CleanupSelection Evaluate(ConfidenceLevel confidence, CleanupRiskLevel risk)
@@ -121,20 +105,33 @@ namespace UninstallTools.Junk.Cleanup
         }
     }
 
-    /// <summary>
-    /// Converts scanner results into a non-destructive cleanup plan.
-    /// Until dedicated risk classifiers are implemented, the default builder
-    /// treats every candidate as high risk and therefore never auto-selects it.
-    /// </summary>
     public static class CleanupPlanBuilder
     {
         public static CleanupPlan Build(IEnumerable<IJunkResult> results)
         {
-            return Build(results, _ => CleanupRiskLevel.High);
+            return Build(results, _ => new CleanupRiskAssessment(CleanupRiskLevel.High,
+                "No dedicated risk classifier was supplied."));
         }
 
         public static CleanupPlan Build(IEnumerable<IJunkResult> results,
             Func<IJunkResult, CleanupRiskLevel> riskResolver)
+        {
+            if (riskResolver == null)
+                throw new ArgumentNullException(nameof(riskResolver));
+
+            return Build(results, result => new CleanupRiskAssessment(riskResolver(result)));
+        }
+
+        public static CleanupPlan Build(IEnumerable<IJunkResult> results, ICleanupRiskClassifier riskClassifier)
+        {
+            if (riskClassifier == null)
+                throw new ArgumentNullException(nameof(riskClassifier));
+
+            return Build(results, riskClassifier.Classify);
+        }
+
+        public static CleanupPlan Build(IEnumerable<IJunkResult> results,
+            Func<IJunkResult, CleanupRiskAssessment> riskResolver)
         {
             if (results == null)
                 throw new ArgumentNullException(nameof(results));
